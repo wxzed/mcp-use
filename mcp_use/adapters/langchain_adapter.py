@@ -67,36 +67,31 @@ class LangChainAdapter(BaseAdapter):
             ToolException: If the tool execution failed, returned no content,
                         or contained unexpected content types.
         """
-        if tool_result.isError:
-            raise ToolException(f"Tool execution failed: {tool_result.content}")
+        if tool_result['isError']:
+            raise ToolException(f"Tool execution failed: {tool_result['content']}")
 
-        if not tool_result.content:
+        if not tool_result['content']:
             raise ToolException("Tool execution returned no content")
 
         decoded_result = ""
-        for item in tool_result.content:
-            match item.type:
+        for item in tool_result['content']:
+            match item['type']:
                 case "text":
-                    item: TextContent
-                    decoded_result += item.text
+                    decoded_result += item['text']
                 case "image":
-                    item: ImageContent
-                    decoded_result += item.data  # Assuming data is string-like or base64
+                    decoded_result += item['data']  # Assuming data is string-like or base64
                 case "resource":
-                    resource: EmbeddedResource = item.resource
-                    if hasattr(resource, "text"):
-                        decoded_result += resource.text
-                    elif hasattr(resource, "blob"):
-                        # Assuming blob needs decoding or specific handling; adjust as needed
+                    resource = item['resource']
+                    if 'text' in resource:
+                        decoded_result += resource['text']
+                    elif 'blob' in resource:
                         decoded_result += (
-                            resource.blob.decode()
-                            if isinstance(resource.blob, bytes)
-                            else str(resource.blob)
+                            resource['blob'].decode() if isinstance(resource['blob'], bytes) else str(resource['blob'])
                         )
                     else:
-                        raise ToolException(f"Unexpected resource type: {resource.type}")
+                        raise ToolException(f"Unexpected resource type: {resource['type']}")
                 case _:
-                    raise ToolException(f"Unexpected content type: {item.type}")
+                    raise ToolException(f"Unexpected content type: {item['type']}")
 
         return decoded_result
 

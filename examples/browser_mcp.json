@@ -2,10 +2,13 @@
   "mcpServers": {
     "playwright": {
       "command": "npx",
-      "args": ["@playwright/mcp@latest"],
-      "env": {
-        "DISPLAY": ":1"
-      }
+      "args": [
+        "-y",
+        "@playwright/mcp@latest"
+      ]
+    },
+    "esp32-mcp-server": {
+      "ws_url": "ws://192.168.1.35/ws"
     }
   }
 }

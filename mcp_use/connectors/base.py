@@ -128,6 +128,7 @@ class BaseConnector(ABC):
     def tools(self) -> list[Tool]:
         """Get the list of available tools."""
         if self._tools is None:
+            print(" self._tools is None");
             raise RuntimeError("MCP client is not initialized")
         return self._tools
 
@@ -135,6 +136,7 @@ class BaseConnector(ABC):
     def resources(self) -> list[Resource]:
         """Get the list of available resources."""
         if self._resources is None:
+            print(" self._resources is None");
             raise RuntimeError("MCP client is not initialized")
         return self._resources
 
@@ -142,6 +144,7 @@ class BaseConnector(ABC):
     def prompts(self) -> list[Prompt]:
         """Get the list of available prompts."""
         if self._prompts is None:
+            print(" self._prompts is None");
             raise RuntimeError("MCP client is not initialized")
         return self._prompts
 

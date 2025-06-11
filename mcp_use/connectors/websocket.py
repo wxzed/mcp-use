@@ -9,6 +9,7 @@ import asyncio
 import json
 import uuid
 from typing import Any
+import traceback
 
 from mcp.types import Tool
 from websockets import ClientConnection
@@ -16,6 +17,8 @@ from websockets import ClientConnection
 from ..logging import logger
 from ..task_managers import ConnectionManager, WebSocketConnectionManager
 from .base import BaseConnector
+from mcp.shared.message import SessionMessage
+from mcp.types import JSONRPCMessage
 
 
 class WebSocketConnector(BaseConnector):
@@ -50,6 +53,9 @@ class WebSocketConnector(BaseConnector):
         self.pending_requests: dict[str, asyncio.Future] = {}
         self._tools: list[Tool] | None = None
         self._connected = False
+        self._resources = []
+        self._prompts = []
+        
 
     async def connect(self) -> None:
         """Establish a connection to the MCP implementation."""
@@ -60,8 +66,8 @@ class WebSocketConnector(BaseConnector):
         logger.debug(f"Connecting to MCP implementation via WebSocket: {self.url}")
         try:
             # Create and start the connection manager
-            self._connection_manager = WebSocketConnectionManager(self.url, self.headers)
-            self.ws = await self._connection_manager.start()
+            self._connection_manager = WebSocketConnectionManager(self.url)
+            self.read_stream, self.write_stream = await self._connection_manager.start()
 
             # Start the message receiver task
             self._receiver_task = asyncio.create_task(
@@ -83,15 +89,18 @@ class WebSocketConnector(BaseConnector):
 
     async def _receive_messages(self) -> None:
         """Continuously receive and process messages from the WebSocket."""
-        if not self.ws:
+        if not self.read_stream:
             raise RuntimeError("WebSocket is not connected")
 
         try:
-            async for message in self.ws:
-                # Parse the message
-                data = json.loads(message)
+            async for message in self.read_stream:
+                logger.debug(f"收到服务器消息: {message} 类型: {type(message)}")
+                if isinstance(message, Exception):
+                    logger.error(f"收到异常: {message}")
+                    continue
 
-                # Check if this is a response to a pending request
+                # message 是 SessionMessage
+                data = message.message.model_dump()
                 request_id = data.get("id")
                 if request_id and request_id in self.pending_requests:
                     future = self.pending_requests.pop(request_id)
@@ -99,14 +108,11 @@ class WebSocketConnector(BaseConnector):
                         future.set_result(data["result"])
                     elif "error" in data:
                         future.set_exception(Exception(data["error"]))
-
                     logger.debug(f"Received response for request {request_id}")
                 else:
-                    logger.debug(f"Received message: {data}")
+                    logger.debug(f"收到非请求响应消息: {data}")
         except Exception as e:
             logger.error(f"Error in WebSocket message receiver: {e}")
-            # If the websocket connection was closed or errored,
-            # reject all pending requests
             for future in self.pending_requests.values():
                 if not future.done():
                     future.set_exception(e)
@@ -166,14 +172,15 @@ class WebSocketConnector(BaseConnector):
                 self.ws = None
 
         # Reset tools
-        self._tools = None
+        # self._tools = None   # 注释掉这行
 
         if errors:
             logger.warning(f"Encountered {len(errors)} errors during resource cleanup")
 
     async def _send_request(self, method: str, params: dict[str, Any] | None = None) -> Any:
         """Send a request and wait for a response."""
-        if not self.ws:
+        logger.debug(f"self._connected={self._connected}, self.write_stream={self.write_stream}")
+        if not self.write_stream:
             raise RuntimeError("WebSocket is not connected")
 
         # Create a request ID
@@ -183,8 +190,10 @@ class WebSocketConnector(BaseConnector):
         future = asyncio.Future()
         self.pending_requests[request_id] = future
 
-        # Send the request
-        await self.ws.send(json.dumps({"id": request_id, "method": method, "params": params or {}}))
+        # 构造 JSONRPCMessage 并用 SessionMessage 包装后发送
+        msg = JSONRPCMessage(jsonrpc="2.0", id=request_id, method=method, params=params or {})
+        session_msg = SessionMessage(msg)
+        await self.write_stream.send(session_msg)
 
         logger.debug(f"Sent request {request_id} method: {method}")
 
@@ -204,7 +213,9 @@ class WebSocketConnector(BaseConnector):
 
         # Get available tools
         tools_result = await self.list_tools()
+        logger.debug(f"tools_result: {tools_result}")
         self._tools = [Tool(**tool) for tool in tools_result]
+        logger.debug(f"self._tools: {self._tools}")
 
         logger.debug(f"MCP session initialized with {len(self._tools)} tools")
         return result
@@ -218,7 +229,9 @@ class WebSocketConnector(BaseConnector):
     @property
     def tools(self) -> list[Tool]:
         """Get the list of available tools."""
-        if not self._tools:
+        if self._tools is None:
+            print("MCP client is not initialized, call stack:")
+            traceback.print_stack()
             raise RuntimeError("MCP client is not initialized")
         return self._tools
 
